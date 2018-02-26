@@ -13,17 +13,10 @@ $null = $showWindowAsync::ShowWindowAsync((Get-Process -Id $pid).MainWindowHandl
 }
 ######### Függvények importálása C++ DLL-ből blokk vége ############ 
 
-Hide-Powershell #Powershell ablak elréjtése
- 
+#Hide-Powershell #Powershell ablak elréjtése
+$sync = [Hashtable]::Synchronized(@{}) #for talking across runspaces.
+
  ######## függvények blokk kezdete ###########
-function Measure-detector_current
-{
-    $portK6485.WriteLine("READ?")
-    $PhotoCurrentString = ($portK6485.ReadLine()).Trimend()
-    [double]$PhotoCurrent=$PhotoCurrentString.Substring(0,$PhotoCurrentString.IndexOf("A")) #string-double konverzió
-    [double]$PhotoCurrent=[double]$PhotoCurrent*-1
-    return [double]$PhotoCurrent
-}
 
 function Save-File([string] $initialDirectory ) 
 {
@@ -40,38 +33,213 @@ function Save-File([string] $initialDirectory )
 
 function Export_to_txt
 {
-    $file=Save-File $PSScriptRoot
-    $Script:UIArray | out-file $file #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    $Script:file=Save-File $PSScriptRoot
+    $mSavePath.Text="Mentési útvonal: $($Script:file)" 
 }
 
 Function Connect_Devices 
 {
-if ($mComboBoX1.SelectedItem -eq $null -or $mComboBoX2.SelectedItem -eq $null)
+    if ($mTapegyseg_combobox.SelectedItem -eq $null -or $mPicoammeter_combobox.SelectedItem -eq $null)
+    {
+        $mConnect_Label.ForeColor = [System.Drawing.Color]::Red
+        $mConnect_Label.Text="Add meg a COM portokat!"
+    }
+    else
+    {
+        $GWCOMport = $mTapegyseg_combobox.SelectedItem -as [string]
+        $Script:gwport= new-Object System.IO.Ports.SerialPort $GWCOMport,9600,None,8,one
+        $K6485COMport = $mPicoammeter_combobox.SelectedItem -as [string]
+        $Script:k6485port= new-Object System.IO.Ports.SerialPort $K6485COMport,9600,None,8,one
+        try
+        {
+            $Script:gwport.Open()
+            $Script:k6485port.Open()
+            $mConnect_Label.Text="A csatlakozas sikeres"
+            $Script:gwport.WriteLine("VSET2:12")
+            $Script:gwport.WriteLine("ISET2:0.5")
+            $Script:gwport.WriteLine("VSET1:3.8")
+            $Script:gwport.WriteLine("ISET1:0")
+            $Script:gwport.WriteLine("OUT1")
+            $Script:k6485port.WriteLine("*RST")
+            $Script:k6485port.WriteLine("SYST:ZCH ON")
+            $Script:k6485port.WriteLine("RANG:AUTO ON")
+            $Script:k6485port.WriteLine("SYST:ZCH OFF")
+            $mStart.Enabled = $true
+            $mConnect.Enabled = $false         
+        }
+        catch
+        {
+          $mConnect_Label.Text="A port foglalt vagy egyéb hiba történt"
+        }
+    }
+ }
+
+# long running task.
+$PID_control = {
+$PID_c = [PowerShell]::Create().AddScript({ # a tenyleges munkátvégző kód
+    
+    function Measure-detector_current
+    {
+        $Script:k6485port.WriteLine("READ?")
+        $PhotoCurrentString = ($Script:k6485port.ReadLine()).Trimend()
+        [double]$PhotoCurrent=$PhotoCurrentString.Substring(0,$PhotoCurrentString.IndexOf("A")) #string-double konverzió
+        [double]$PhotoCurrent=[double]$PhotoCurrent*-1
+        return [double]$PhotoCurrent
+    }
+    
+    $sync.mConnect_Label.Text = "asd"
+    $sync.mStart.Enabled = $false
+    $sync.mStop.Enabled = $true
+    [double]$set_point = 0.0000001432
+    [double]$KP = 0.1
+    [double]$KI = 0.01
+    [double]$KD = 0
+    [double]$iteration_time = 70
+    
+    [double]$error_difference = 0
+    [double]$actual_value = 0
+    [double]$derivative = 0
+    [double]$output = 0
+
+    [double]$error_prior = 0
+    [double]$integral = 0
+
+    [double]$intergral_prior = 0
+
+    [double]$m=3884874
+    [double]$b=-0.1254
+    $i=0 #debug változó töröld
+ :labeled_loop While ($true) #végtelen ciklus
+    {
+        <#$actual_value = Measure-detector_current #detektoráram mérése
+
+        $error_difference = $set_point - $actual_value
+        $integral = $integral + ($error_difference * $iteration_time)
+            if ($integral -lt 0)
+            {
+                $integral = 0
+            }
+            if ($output -eq 1)
+            {
+                $integral = $intergral_prior
+            }
+            if ($output -eq 1 -and ($error_difference -gt $error_prior * 1.1 -or $error_difference -lt $error_prior * 0.9))
+            {
+                $integral = $integral + ($error_difference * $iteration_time)
+            }
+        $derivative = ($error_difference - $error_prior)/$iteration_time
+        $output = $KP * $error_difference + $KI * $integral + $KD * $derivative
+        $output = $m * $output + $b #detektor áram konvertálása LED meghajtóárammá
+        $output =  [System.Math]::Round($output,3) #LED meghajtóáram konvetálása 3 tizedesjegyre
+        if ($output -lt 0)
+            {
+                $output = 0
+            }
+            elseif ($output -gt 1)
+            {
+                $output = 1
+            }
+        $Script:gwport.WriteLine("ISET1:$($output)") #tápegységnek az új LED meghajtóáram érték küldése
+
+        $set_point.ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $Script:file -Append
+
+        $error_prior  = $error_difference
+        $intergral_prior = $integral
+        #>
+        
+        $sync.mConnect_Label.Text = "OUT$($i % 2)"
+        Send-LED-Current "OUT$($i % 2)"
+        if ($sync.mStop.Enabled -eq $false)
+            {
+            break labeled_loop 
+            }
+        $i++
+        Start-Sleep -Milliseconds 1000
+     }
+     $sync.mStart.Enabled = $true
+     #$Script:k6485port.Close()
+     #$Script:gwport.Close()
+     $sync.mConnect.Enabled = $true
+     $sync.mConnect_Label.Text = "lecsatlakozva?"
+})
+
+$runspace = [RunspaceFactory]::CreateRunspace() #Creates a single runspace that uses the default host and runspace configuration.
+$runspace.ApartmentState = "STA" #Single Threaded Apartment (STA) thread-safe
+$runspace.ThreadOptions = "ReuseThread" #Creates a new thread for the first invocation and then re-uses that thread in subsequent invocations.
+$runspace.Open()
+$runspace.SessionStateProxy.SetVariable("sync", $sync) #Sharing Variables and Live Objects Between PowerShell Runspaces
+
+$PID_c.Runspace = $runspace # Add $PID_c to runspace
+$PID_c.BeginInvoke()
+}
+
+$StopPIDloop = {
+    $sync.mStop.Enabled = $false
+    $sync.period = 1
+}
+
+<#
+function PID_control
 {
-$mLabel11.Text="Add meg a COM portokat!"
-}
-else
-{
-$GWCOMport = $mComboBoX1.SelectedItem -as [string]
-$Script:gwport= new-Object System.IO.Ports.SerialPort $GWCOMport,9600,None,8,one
-$K2000COMport = $mComboBoX2.SelectedItem -as [string]
-$Script:k2000port= new-Object System.IO.Ports.SerialPort $K2000COMport,9600,None,8,one
-try
-{
-$Script:gwport.Open()
-$Script:k2000port.Open()
-$mLabel11.Text="A csatlakozas sikeres"
-$Script:k2000port.WriteLine("SYSTem:BEEPer:STATe 0")
-$Script:k2000port.WriteLine(":INITiate:CONTinuous OFF")
-$mButton2.Enabled = $true
-}
-catch
-{
-$mLabel11.Text="A port foglalt vagy egyéb hiba történt"
-}
-}
- 
-}
+    [double]$set_point = 0.0000001432
+    [double]$KP = 0.1
+    [double]$KI = 0.01
+    [double]$KD = 0
+    [double]$iteration_time = 70
+    
+    [double]$error_difference = 0
+    [double]$actual_value = 0
+    [double]$derivative = 0
+    [double]$output = 0
+
+    [double]$error_prior = 0
+    [double]$integral = 0
+
+    [double]$intergral_prior = 0
+
+    [double]$m=3884874
+    [double]$b=-0.1254
+
+    While ($true) #végtelen ciklus
+    {
+        $actual_value = Measure-detector_current #detektoráram mérése
+
+        $error_difference = $set_point - $actual_value
+        $integral = $integral + ($error_difference * $iteration_time)
+            if ($integral -lt 0)
+            {
+                $integral = 0
+            }
+            if ($output -eq 1)
+            {
+                $integral = $intergral_prior
+            }
+            if ($output -eq 1 -and ($error_difference -gt $error_prior * 1.1 -or $error_difference -lt $error_prior * 0.9))
+            {
+                $integral = $integral + ($error_difference * $iteration_time)
+            }
+        $derivative = ($error_difference - $error_prior)/$iteration_time
+        $output = $KP * $error_difference + $KI * $integral + $KD * $derivative
+        $output = $m * $output + $b #detektor áram konvertálása LED meghajtóárammá
+        $output =  [System.Math]::Round($output,3) #LED meghajtóáram konvetálása 3 tizedesjegyre
+        if ($output -lt 0)
+            {
+                $output = 0
+            }
+            elseif ($output -gt 1)
+            {
+                $output = 1
+            }
+        $Script:gwport.WriteLine("ISET1:$($output)") #tápegységnek az új LED meghajtóáram érték küldése
+
+        $set_point.ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $Script:file -Append
+
+        $error_prior  = $error_difference
+        $intergral_prior = $integral
+   
+        Start-Sleep -Milliseconds $iteration_time
+    }
+}#>
 
 ######## függvények blokk vége ###########
 
@@ -82,7 +250,7 @@ $mLabel11.Text="A port foglalt vagy egyéb hiba történt"
     $MyForm.Text="Fény szabályzás" 
     $MyForm.Size = New-Object System.Drawing.Size(500,750) 
      
- 
+#tapegység kiválasztása combo 
         $mTapegyseg_combobox = New-Object System.Windows.Forms.ComboBoX 
                 $mTapegyseg_combobox.Text="" 
                 $mTapegyseg_combobox.Top="50" 
@@ -91,7 +259,7 @@ $mLabel11.Text="A port foglalt vagy egyéb hiba történt"
         $mTapegyseg_combobox.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mTapegyseg_combobox) 
         $mTapegyseg_combobox.Items.AddRange([System.IO.Ports.SerialPort]::getportnames()) 
- 
+#tapegység kiválasztása label
         $mTapegyseg_Label = New-Object System.Windows.Forms.Label 
                 $mTapegyseg_Label.Text="Tápegység port" 
                 $mTapegyseg_Label.Top="25" 
@@ -100,7 +268,7 @@ $mLabel11.Text="A port foglalt vagy egyéb hiba történt"
         $mTapegyseg_Label.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mTapegyseg_Label) 
          
- 
+#picoammeter kiválasztása combo  
         $mPicoammeter_combobox = New-Object System.Windows.Forms.ComboBoX 
                 $mPicoammeter_combobox.Text="" 
                 $mPicoammeter_combobox.Top="51" 
@@ -109,124 +277,193 @@ $mLabel11.Text="A port foglalt vagy egyéb hiba történt"
         $mPicoammeter_combobox.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mPicoammeter_combobox) 
         $mPicoammeter_combobox.Items.AddRange([System.IO.Ports.SerialPort]::getportnames()) 
- 
+#picoammeter kiválasztása label
         $mPicoammeter_Label = New-Object System.Windows.Forms.Label 
                 $mPicoammeter_Label.Text="Picoampermérő port" 
                 $mPicoammeter_Label.Top="25" 
                 $mPicoammeter_Label.Left="185" 
                 $mPicoammeter_Label.Anchor="Left,Top" 
         $mPicoammeter_Label.Size = New-Object System.Drawing.Size(120,23) 
-        $MyForm.Controls.Add($mPicoammeter_Label) 
+        $MyForm.Controls.Add($mPicoammeter_Label)
+
+#csatlakozás button label
+        $mConnect_Label = New-Object System.Windows.Forms.Label 
+                $mConnect_Label.Text="Válaszd ki a műszerek COM portját és nyomd meg a csatlakozás gombot." 
+                $mConnect_Label.Top="15" 
+                $mConnect_Label.Left="320" 
+                $mConnect_Label.Anchor="Left,Top" 
+        $mConnect_Label.Size = New-Object System.Drawing.Size(150,50) 
+        $MyForm.Controls.Add($mConnect_Label) 
          
- 
+#csatalakozás button
         $mConnect = New-Object System.Windows.Forms.Button 
                 $mConnect.Text="Csatlakozás" 
-                $mConnect.Top="51" 
-                $mConnect.Left="349" 
+                $mConnect.Top="70" 
+                $mConnect.Left="350" 
                 $mConnect.Anchor="Left,Top" 
         $mConnect.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mConnect) 
          
- 
+#cel track           
         $mCel_TrackBar = New-Object System.Windows.Forms.TrackBar 
                 $mCel_TrackBar.Text="TrackBar1" 
                 $mCel_TrackBar.Top="108" 
                 $mCel_TrackBar.Left="22" 
-                $mCel_TrackBar.Anchor="Left,Top" 
-        $mCel_TrackBar.Size = New-Object System.Drawing.Size(460,23) 
+                $mCel_TrackBar.Anchor="Left,Top"
+
+                $mCel_TrackBar.SetRange(10,160)
+                $mCel_TrackBar.TickFrequency=5
+                $mCel_TrackBar.Value=100
+                $TrackLabel_CEL_Value=100
+
+        $mCel_TrackBar.Size = New-Object System.Drawing.Size(460,23)
+
+        $mCel_TrackBar.add_ValueChanged({
+        $TrackLabel_CEL_Value = $mCel_TrackBar.Value
+        $mCel_Label.Text = "Célérték: $($TrackLabel_CEL_Value)nA"
+        })
+
         $MyForm.Controls.Add($mCel_TrackBar) 
          
- 
+#cel label
         $mCel_Label = New-Object System.Windows.Forms.Label 
-                $mCel_Label.Text="Célérték" 
+                $mCel_Label.Text="Célérték: $($TrackLabel_CEL_Value)nA"
                 $mCel_Label.Top="162" 
                 $mCel_Label.Left="218" 
                 $mCel_Label.Anchor="Left,Top" 
         $mCel_Label.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mCel_Label) 
          
- 
+#P track
         $mKP_TrackBar = New-Object System.Windows.Forms.TrackBar 
                 $mKP_TrackBar.Text="TrackBar2" 
                 $mKP_TrackBar.Top="195" 
                 $mKP_TrackBar.Left="20" 
-                $mKP_TrackBar.Anchor="Left,Top" 
-        $mKP_TrackBar.Size = New-Object System.Drawing.Size(460,23) 
+                $mKP_TrackBar.Anchor="Left,Top"
+
+                 $mKP_TrackBar.SetRange(10,1100)
+                 $mKP_TrackBar.TickFrequency=50
+                 $mKP_TrackBar.Value=200
+                $TrackLabel_P_Value=200
+
+        $mKP_TrackBar.Size = New-Object System.Drawing.Size(460,23)
+
+          $mKP_TrackBar.add_ValueChanged({
+        $TrackLabel_P_Value =  $mKP_TrackBar.Value
+        $mKP_Label.Text = "KP értéke: $($TrackLabel_P_Value/1000)"
+        })
+
         $MyForm.Controls.Add($mKP_TrackBar) 
          
- 
+#P label
         $mKP_Label = New-Object System.Windows.Forms.Label 
-                $mKP_Label.Text="KP értéke" 
+                $mKP_Label.Text="KP értéke: $($TrackLabel_P_Value/1000)"
                 $mKP_Label.Top="252" 
                 $mKP_Label.Left="217" 
                 $mKP_Label.Anchor="Left,Top" 
         $mKP_Label.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mKP_Label) 
          
- 
+#I track
         $mKI_TrackBar = New-Object System.Windows.Forms.TrackBar 
                 $mKI_TrackBar.Text="TrackBar3" 
                 $mKI_TrackBar.Top="289" 
                 $mKI_TrackBar.Left="21" 
-                $mKI_TrackBar.Anchor="Left,Top" 
+                $mKI_TrackBar.Anchor="Left,Top"
+
+                $mKI_TrackBar.SetRange(1,110)
+                $mKI_TrackBar.TickFrequency=5
+                $mKI_TrackBar.Value=40
+                $TrackLabel_I_Value=40
+
         $mKI_TrackBar.Size = New-Object System.Drawing.Size(460,23) 
+        
+        $mKI_TrackBar.add_ValueChanged({
+        $TrackLabel_I_Value =  $mKI_TrackBar.Value
+        $mKI_Label.Text = "KI értéke: $($TrackLabel_I_Value/1000)"
+        })
+
         $MyForm.Controls.Add($mKI_TrackBar) 
          
- 
+#I label
         $mKI_Label = New-Object System.Windows.Forms.Label 
-                $mKI_Label.Text="KI értéke" 
+                $mKI_Label.Text="KI értéke: $($TrackLabel_I_Value/1000)"
                 $mKI_Label.Top="346" 
                 $mKI_Label.Left="223" 
                 $mKI_Label.Anchor="Left,Top" 
         $mKI_Label.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mKI_Label) 
          
- 
+#D trackbar
         $mKD_TrackBar = New-Object System.Windows.Forms.TrackBar 
                 $mKD_TrackBar.Text="TrackBar4" 
                 $mKD_TrackBar.Top="392" 
                 $mKD_TrackBar.Left="23" 
-                $mKD_TrackBar.Anchor="Left,Top" 
+                $mKD_TrackBar.Anchor="Left,Top"
+
+                $mKD_TrackBar.SetRange(0,1000)
+                $mKD_TrackBar.TickFrequency=50
+                $mKD_TrackBar.Value=0
+                $TrackLabel_D_Value=0
+
         $mKD_TrackBar.Size = New-Object System.Drawing.Size(460,23) 
+
+        $mKD_TrackBar.add_ValueChanged({
+        $TrackLabel_D_Value =  $mKD_TrackBar.Value
+        $mKD_Label.Text = "KD értéke: $($TrackLabel_D_Value/1000)"
+        })
+
         $MyForm.Controls.Add($mKD_TrackBar) 
          
- 
+#D label
         $mKD_Label = New-Object System.Windows.Forms.Label 
-                $mKD_Label.Text="KD értéke" 
+                $mKD_Label.Text="KD értéke: $($TrackLabel_D_Value/1000)"
                 $mKD_Label.Top="449" 
                 $mKD_Label.Left="221" 
                 $mKD_Label.Anchor="Left,Top" 
         $mKD_Label.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mKD_Label) 
          
- 
+#sample rate track 
         $mMintavet_TrackBar = New-Object System.Windows.Forms.TrackBar 
                 $mMintavet_TrackBar.Text="TrackBar5" 
                 $mMintavet_TrackBar.Top="492" 
                 $mMintavet_TrackBar.Left="24" 
-                $mMintavet_TrackBar.Anchor="Left,Top" 
-        $mMintavet_TrackBar.Size = New-Object System.Drawing.Size(460,23) 
+                $mMintavet_TrackBar.Anchor="Left,Top"
+                
+                $mMintavet_TrackBar.SetRange(70,7000)
+                $mMintavet_TrackBar.TickFrequency=70
+                $mMintavet_TrackBar.Value=70
+                $TrackLabel_M_Value=70
+                 
+        $mMintavet_TrackBar.Size = New-Object System.Drawing.Size(460,23)
+
+        $mMintavet_TrackBar.add_ValueChanged({
+        $TrackLabel_M_Value =  $mMintavet_TrackBar.Value
+        $mMintavet_Label.Text = "Mintavételezési idő: $($TrackLabel_M_Value)ms"
+        })
+
         $MyForm.Controls.Add($mMintavet_TrackBar) 
          
- 
+#sample rate label
         $mMintavet_Label = New-Object System.Windows.Forms.Label 
-                $mMintavet_Label.Text="Mintavételezési idő" 
+                $mMintavet_Label.Text="Mintavételezési idő: $($TrackLabel_M_Value)ms"
                 $mMintavet_Label.Top="547" 
                 $mMintavet_Label.Left="200" 
                 $mMintavet_Label.Anchor="Left,Top" 
-        $mMintavet_Label.Size = New-Object System.Drawing.Size(120,23) 
+        $mMintavet_Label.Size = New-Object System.Drawing.Size(120,30) 
         $MyForm.Controls.Add($mMintavet_Label) 
          
- 
+#mentési útvonal label 
         $mSavePath = New-Object System.Windows.Forms.Label 
-                $mSavePath.Text="Mentési útvonal:" 
+                $mSavePath.Text="Mentési útvonal: " 
                 $mSavePath.Top="587" 
                 $mSavePath.Left="28" 
                 $mSavePath.Anchor="Left,Top" 
         $mSavePath.Size = New-Object System.Drawing.Size(460,50) 
         $MyForm.Controls.Add($mSavePath) 
          
- 
+ #mentési útvonal button
         $mSave = New-Object System.Windows.Forms.Button 
                 $mSave.Text="Mentési útvonal" 
                 $mSave.Top="646" 
@@ -235,23 +472,41 @@ $mLabel11.Text="A port foglalt vagy egyéb hiba történt"
         $mSave.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mSave) 
          
- 
+#start PID control button
         $mStart = New-Object System.Windows.Forms.Button 
                 $mStart.Text="Indítás" 
                 $mStart.Top="647" 
                 $mStart.Left="207" 
                 $mStart.Anchor="Left,Top" 
-        $mStart.Size = New-Object System.Drawing.Size(100,23) 
+        $mStart.Size = New-Object System.Drawing.Size(100,23)
+        $mStart.Enabled = $false
         $MyForm.Controls.Add($mStart) 
          
- 
+#Stop PID control button
         $mStop = New-Object System.Windows.Forms.Button 
                 $mStop.Text="Leállítás" 
                 $mStop.Top="647" 
                 $mStop.Left="366" 
                 $mStop.Anchor="Left,Top" 
-        $mStop.Size = New-Object System.Drawing.Size(100,23) 
+        $mStop.Size = New-Object System.Drawing.Size(100,23)
+        $mStop.Enabled = $false
         $MyForm.Controls.Add($mStop) 
-        $MyForm.ShowDialog()
+        
+        $mSave.Add_Click({Export_to_txt})
+        $mConnect.Add_Click({Connect_Devices})
+        $mStart.Add_Click($PID_control)
+        $mStop.Add_Click($StopPIDloop)
+
+        # add controls to the form.
+        $sync.mStart = $mStart
+        $sync.mCel_Label = $mCel_Label
+        $sync.mStop = $mStop
+        $sync.mKP_Label = $mKP_Label 
+        $sync.mConnect_Label = $mConnect_Label
+        $sync.mConnect = $mConnect
+
+        $MyForm.Controls.AddRange(@($sync.mStart, $sync.mCel_Label,$sync.mStop, $sync.mKP_Label, $sync.mConnect_Label, $sync.mConnect))
+
+        $MyForm.ShowDialog()  
 
 ############ GUI blokk vége ######################### 
