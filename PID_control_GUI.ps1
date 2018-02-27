@@ -33,8 +33,11 @@ function Save-File([string] $initialDirectory )
 
 function Export_to_txt
 {
-    $Script:file=Save-File $PSScriptRoot
-    $mSavePath.Text="Mentési útvonal: $($Script:file)" 
+    $Script:file=Save-File $PSScriptRoot # variable scope for the whole script
+    $mSavePath.Text="Mentési útvonal: $($file)"
+    $sync.file=$file
+    if ($mConnect.Enabled -eq $false)
+    {$mStart.Enabled = $true}    
 }
 
 Function Connect_Devices 
@@ -47,24 +50,25 @@ Function Connect_Devices
     else
     {
         $GWCOMport = $mTapegyseg_combobox.SelectedItem -as [string]
-        $Script:gwport= new-Object System.IO.Ports.SerialPort $GWCOMport,9600,None,8,one
+        $Script:gwport= new-Object System.IO.Ports.SerialPort $GWCOMport,9600,None,8,one # variable scope for the whole script
         $K6485COMport = $mPicoammeter_combobox.SelectedItem -as [string]
-        $Script:k6485port= new-Object System.IO.Ports.SerialPort $K6485COMport,9600,None,8,one
+        $Script:k6485port= new-Object System.IO.Ports.SerialPort $K6485COMport,9600,None,8,one # variable scope for the whole script
         try
         {
-            $Script:gwport.Open()
-            $Script:k6485port.Open()
+            $gwport.Open()
+            $sync.gwport=$gwport
+            $k6485port.Open()
+            $sync.k6485port=$k6485port
             $mConnect_Label.Text="A csatlakozas sikeres"
-            $Script:gwport.WriteLine("VSET2:12")
-            $Script:gwport.WriteLine("ISET2:0.5")
-            $Script:gwport.WriteLine("VSET1:3.8")
-            $Script:gwport.WriteLine("ISET1:0")
-            $Script:gwport.WriteLine("OUT1")
-            $Script:k6485port.WriteLine("*RST")
-            $Script:k6485port.WriteLine("SYST:ZCH ON")
-            $Script:k6485port.WriteLine("RANG:AUTO ON")
-            $Script:k6485port.WriteLine("SYST:ZCH OFF")
-            $mStart.Enabled = $true
+            $gwport.WriteLine("VSET2:12")
+            $gwport.WriteLine("ISET2:0.5")
+            $gwport.WriteLine("VSET1:3.8")
+            $gwport.WriteLine("ISET1:0")
+            $gwport.WriteLine("OUT1")
+            $k6485port.WriteLine("*RST")
+            $k6485port.WriteLine("SYST:ZCH ON")
+            $k6485port.WriteLine("RANG:AUTO ON")
+            $k6485port.WriteLine("SYST:ZCH OFF")
             $mConnect.Enabled = $false         
         }
         catch
@@ -78,16 +82,15 @@ Function Connect_Devices
 $PID_control = {
 $PID_c = [PowerShell]::Create().AddScript({ # a tenyleges munkátvégző kód
     
-    function Measure-detector_current
+    function Measure-detector_current #must be inside the runspace, custom functions outside of the runspace cannot be called?
     {
-        $Script:k6485port.WriteLine("READ?")
-        $PhotoCurrentString = ($Script:k6485port.ReadLine()).Trimend()
+        $sync.k6485port.WriteLine("READ?")
+        $PhotoCurrentString = ($sync.k6485port.ReadLine()).Trimend()
         [double]$PhotoCurrent=$PhotoCurrentString.Substring(0,$PhotoCurrentString.IndexOf("A")) #string-double konverzió
         [double]$PhotoCurrent=[double]$PhotoCurrent*-1
         return [double]$PhotoCurrent
     }
     
-    $sync.mConnect_Label.Text = "asd"
     $sync.mStart.Enabled = $false
     $sync.mStop.Enabled = $true
     [double]$set_point = 0.0000001432
@@ -108,10 +111,10 @@ $PID_c = [PowerShell]::Create().AddScript({ # a tenyleges munkátvégző kód
 
     [double]$m=3884874
     [double]$b=-0.1254
-    $i=0 #debug változó töröld
+    #$i=0 #debug variable
  :labeled_loop While ($true) #végtelen ciklus
     {
-        <#$actual_value = Measure-detector_current #detektoráram mérése
+        $actual_value = Measure-detector_current #detektoráram mérése
 
         $error_difference = $set_point - $actual_value
         $integral = $integral + ($error_difference * $iteration_time)
@@ -139,28 +142,36 @@ $PID_c = [PowerShell]::Create().AddScript({ # a tenyleges munkátvégző kód
             {
                 $output = 1
             }
-        $Script:gwport.WriteLine("ISET1:$($output)") #tápegységnek az új LED meghajtóáram érték küldése
+        $sync.gwport.WriteLine("ISET1:$($output)") #tápegységnek az új LED meghajtóáram érték küldése
 
-        $set_point.ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $Script:file -Append
+        $set_point.ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $sync.file -Append
 
         $error_prior  = $error_difference
         $intergral_prior = $integral
-        #>
         
+        Start-Sleep -Milliseconds $iteration_time
+
+        if ($sync.mStop.Enabled -eq $false)
+        {
+            break labeled_loop 
+        }
+
+        <#debug
         $sync.mConnect_Label.Text = "OUT$($i % 2)"
-        Send-LED-Current "OUT$($i % 2)"
+        $sync.gwport.WriteLine("OUT$($i % 2)")
         if ($sync.mStop.Enabled -eq $false)
             {
             break labeled_loop 
             }
         $i++
-        Start-Sleep -Milliseconds 1000
+        Start-Sleep -Milliseconds 2000#>
+
      }
+     $sync.k6485port.Close()
+     $sync.gwport.Close()
      $sync.mStart.Enabled = $true
-     #$Script:k6485port.Close()
-     #$Script:gwport.Close()
      $sync.mConnect.Enabled = $true
-     $sync.mConnect_Label.Text = "lecsatlakozva?"
+     $sync.mConnect_Label.Text = "Műszerek lecsatlakoztatva"    
 })
 
 $runspace = [RunspaceFactory]::CreateRunspace() #Creates a single runspace that uses the default host and runspace configuration.
@@ -178,7 +189,7 @@ $StopPIDloop = {
     $sync.period = 1
 }
 
-<#
+<# #single trheaded realizaion, problem: GUI blocking
 function PID_control
 {
     [double]$set_point = 0.0000001432
@@ -230,9 +241,9 @@ function PID_control
             {
                 $output = 1
             }
-        $Script:gwport.WriteLine("ISET1:$($output)") #tápegységnek az új LED meghajtóáram érték küldése
+        $gwport.WriteLine("ISET1:$($output)") #tápegységnek az új LED meghajtóáram érték küldése
 
-        $set_point.ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $Script:file -Append
+        $set_point.ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $file -Append
 
         $error_prior  = $error_difference
         $intergral_prior = $integral
