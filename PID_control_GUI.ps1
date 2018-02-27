@@ -13,7 +13,7 @@ $null = $showWindowAsync::ShowWindowAsync((Get-Process -Id $pid).MainWindowHandl
 }
 ######### Függvények importálása C++ DLL-ből blokk vége ############ 
 
-#Hide-Powershell #Powershell ablak elréjtése
+Hide-Powershell #Powershell ablak elréjtése
 $sync = [Hashtable]::Synchronized(@{}) #for talking across runspaces.
 
  ######## függvények blokk kezdete ###########
@@ -269,19 +269,27 @@ $StopPIDloop = {
 
         $mCel_TrackBar.add_ValueChanged({
         $TrackLabel_CEL_Value = $mCel_TrackBar.Value
-        $mCel_Label.Text = $TrackLabel_CEL_Value #"Célérték: $($TrackLabel_CEL_Value)nA"
+        $mCel_Label.Text = $TrackLabel_CEL_Value
         })
 
         $MyForm.Controls.Add($mCel_TrackBar) 
          
 #cel label
         $mCel_Label = New-Object System.Windows.Forms.Label 
-                $mCel_Label.Text= $TrackLabel_CEL_Value #"Célérték: $($TrackLabel_CEL_Value)nA"
+                $mCel_Label.Text= $TrackLabel_CEL_Value 
                 $mCel_Label.Top="162" 
                 $mCel_Label.Left="218" 
                 $mCel_Label.Anchor="Left,Top" 
         $mCel_Label.Size = New-Object System.Drawing.Size(100,23) 
-        $MyForm.Controls.Add($mCel_Label) 
+        $MyForm.Controls.Add($mCel_Label)
+#cel label descripion
+       $mCel_desc_Label = New-Object System.Windows.Forms.Label 
+                $mCel_desc_Label.Text= "Célérték [nA]:"
+                $mCel_desc_Label.Top="162" 
+                $mCel_desc_Label.Left="140" 
+                $mCel_desc_Label.Anchor="Left,Top" 
+        $mCel_desc_Label.Size = New-Object System.Drawing.Size(75,23) 
+        $MyForm.Controls.Add($mCel_desc_Label)
          
 #P track
         $mKP_TrackBar = New-Object System.Windows.Forms.TrackBar 
@@ -290,28 +298,37 @@ $StopPIDloop = {
                 $mKP_TrackBar.Left="20" 
                 $mKP_TrackBar.Anchor="Left,Top"
 
-                 $mKP_TrackBar.SetRange(10,1100)
-                 $mKP_TrackBar.TickFrequency=50
-                 $mKP_TrackBar.Value=100
-                $TrackLabel_P_Value=100
+                 $mKP_TrackBar.SetRange(10,11000)
+                 $mKP_TrackBar.TickFrequency=500
+                 $mKP_TrackBar.Value=10000
+                $TrackLabel_P_Value=10000
 
         $mKP_TrackBar.Size = New-Object System.Drawing.Size(460,23)
 
           $mKP_TrackBar.add_ValueChanged({
         $TrackLabel_P_Value =  $mKP_TrackBar.Value
-        $mKP_Label.Text = $TrackLabel_P_Value/1000 #"KP értéke: $($TrackLabel_P_Value/1000)"
+        $mKP_Label.Text = $TrackLabel_P_Value/100000
         })
 
         $MyForm.Controls.Add($mKP_TrackBar) 
          
 #P label
         $mKP_Label = New-Object System.Windows.Forms.Label 
-                $mKP_Label.Text= $TrackLabel_P_Value/1000 #"KP értéke: $($TrackLabel_P_Value/1000)"
+                $mKP_Label.Text= $TrackLabel_P_Value/100000 
                 $mKP_Label.Top="252" 
                 $mKP_Label.Left="217" 
                 $mKP_Label.Anchor="Left,Top" 
         $mKP_Label.Size = New-Object System.Drawing.Size(100,23) 
-        $MyForm.Controls.Add($mKP_Label) 
+        $MyForm.Controls.Add($mKP_Label)
+
+#p label descripion
+       $mKP_desc_Label = New-Object System.Windows.Forms.Label 
+                $mKP_desc_Label.Text= "KP értéke:"
+                $mKP_desc_Label.Top="252" 
+                $mKP_desc_Label.Left="140" 
+                $mKP_desc_Label.Anchor="Left,Top" 
+        $mKP_desc_Label.Size = New-Object System.Drawing.Size(75,23) 
+        $MyForm.Controls.Add($mKP_desc_Label)
          
 #I track
         $mKI_TrackBar = New-Object System.Windows.Forms.TrackBar 
@@ -320,28 +337,37 @@ $StopPIDloop = {
                 $mKI_TrackBar.Left="21" 
                 $mKI_TrackBar.Anchor="Left,Top"
 
-                $mKI_TrackBar.SetRange(1,110)
+                $mKI_TrackBar.SetRange(1,1100)
                 $mKI_TrackBar.TickFrequency=5
-                $mKI_TrackBar.Value=10
-                $TrackLabel_I_Value=10
+                $mKI_TrackBar.Value=1000
+                $TrackLabel_I_Value=1000
 
         $mKI_TrackBar.Size = New-Object System.Drawing.Size(460,23) 
         
         $mKI_TrackBar.add_ValueChanged({
         $TrackLabel_I_Value =  $mKI_TrackBar.Value
-        $mKI_Label.Text = $TrackLabel_I_Value/1000 #"KI értéke: $($TrackLabel_I_Value/1000)"
+        $mKI_Label.Text = $TrackLabel_I_Value/100000 
         })
 
         $MyForm.Controls.Add($mKI_TrackBar) 
          
 #I label
         $mKI_Label = New-Object System.Windows.Forms.Label 
-                $mKI_Label.Text= $TrackLabel_I_Value/1000 #"KI értéke: $($TrackLabel_I_Value/1000)"
+                $mKI_Label.Text= $TrackLabel_I_Value/100000 
                 $mKI_Label.Top="346" 
                 $mKI_Label.Left="223" 
                 $mKI_Label.Anchor="Left,Top" 
         $mKI_Label.Size = New-Object System.Drawing.Size(100,23) 
-        $MyForm.Controls.Add($mKI_Label) 
+        $MyForm.Controls.Add($mKI_Label)
+
+#I label descripion
+       $mKI_desc_Label = New-Object System.Windows.Forms.Label 
+                $mKI_desc_Label.Text= "KI értéke:"
+                $mKI_desc_Label.Top="346" 
+                $mKI_desc_Label.Left="140" 
+                $mKI_desc_Label.Anchor="Left,Top" 
+        $mKI_desc_Label.Size = New-Object System.Drawing.Size(75,23) 
+        $MyForm.Controls.Add($mKI_desc_Label)
          
 #D trackbar
         $mKD_TrackBar = New-Object System.Windows.Forms.TrackBar 
@@ -359,19 +385,28 @@ $StopPIDloop = {
 
         $mKD_TrackBar.add_ValueChanged({
         $TrackLabel_D_Value =  $mKD_TrackBar.Value
-        $mKD_Label.Text = $TrackLabel_D_Value/1000 #"KD értéke: $($TrackLabel_D_Value/1000)"
+        $mKD_Label.Text = $TrackLabel_D_Value/1000 
         })
 
         $MyForm.Controls.Add($mKD_TrackBar) 
          
 #D label
         $mKD_Label = New-Object System.Windows.Forms.Label 
-                $mKD_Label.Text= $TrackLabel_D_Value/1000 #"KD értéke: $($TrackLabel_D_Value/1000)"
+                $mKD_Label.Text= $TrackLabel_D_Value/1000 
                 $mKD_Label.Top="449" 
                 $mKD_Label.Left="221" 
                 $mKD_Label.Anchor="Left,Top" 
         $mKD_Label.Size = New-Object System.Drawing.Size(100,23) 
         $MyForm.Controls.Add($mKD_Label) 
+
+#D label descripion
+       $mKD_desc_Label = New-Object System.Windows.Forms.Label 
+                $mKD_desc_Label.Text= "KD értéke:"
+                $mKD_desc_Label.Top="449" 
+                $mKD_desc_Label.Left="140" 
+                $mKD_desc_Label.Anchor="Left,Top" 
+        $mKD_desc_Label.Size = New-Object System.Drawing.Size(75,23) 
+        $MyForm.Controls.Add($mKD_desc_Label)
          
 #sample rate track 
         $mMintavet_TrackBar = New-Object System.Windows.Forms.TrackBar 
@@ -389,19 +424,28 @@ $StopPIDloop = {
 
         $mMintavet_TrackBar.add_ValueChanged({
         $TrackLabel_M_Value =  $mMintavet_TrackBar.Value
-        $mMintavet_Label.Text = $TrackLabel_M_Value #"Mintavételezési idő: $($TrackLabel_M_Value)ms"
+        $mMintavet_Label.Text = $TrackLabel_M_Value 
         })
 
         $MyForm.Controls.Add($mMintavet_TrackBar) 
          
 #sample rate label
         $mMintavet_Label = New-Object System.Windows.Forms.Label 
-                $mMintavet_Label.Text= $TrackLabel_M_Value #"Mintavételezési idő: $($TrackLabel_M_Value)ms"
+                $mMintavet_Label.Text= $TrackLabel_M_Value 
                 $mMintavet_Label.Top="547" 
-                $mMintavet_Label.Left="200" 
+                $mMintavet_Label.Left="280" 
                 $mMintavet_Label.Anchor="Left,Top" 
         $mMintavet_Label.Size = New-Object System.Drawing.Size(120,30) 
-        $MyForm.Controls.Add($mMintavet_Label) 
+        $MyForm.Controls.Add($mMintavet_Label)
+
+#sample rate label descripion
+       $mMintavet_desc_Label = New-Object System.Windows.Forms.Label 
+                $mMintavet_desc_Label.Text= "Mintavételezési idő [ms]:"
+                $mMintavet_desc_Label.Top="547" 
+                $mMintavet_desc_Label.Left="140" 
+                $mMintavet_desc_Label.Anchor="Left,Top" 
+        $mMintavet_desc_Label.Size = New-Object System.Drawing.Size(130,23) 
+        $MyForm.Controls.Add($mMintavet_desc_Label)
          
 #mentési útvonal label 
         $mSavePath = New-Object System.Windows.Forms.Label 
