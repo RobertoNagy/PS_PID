@@ -93,11 +93,12 @@ $PID_c = [PowerShell]::Create().AddScript({ # a tenyleges munkátvégző kód
     
     $sync.mStart.Enabled = $false
     $sync.mStop.Enabled = $true
-    [double]$set_point = 0.0000001432
-    [double]$KP = 0.1
-    [double]$KI = 0.01
-    [double]$KD = 0
-    [double]$iteration_time = 70
+    
+    #[double]$set_point = $sync.mCel_Label.Text/1000000000
+    #[double]$KP = $sync.mKP_Label.Text
+    #[double]$KI = $sync.mKI_Label.Text
+    #[double]$KD = $sync.mKD_Label.Text
+    #double]$iteration_time = $sync.mMintavet_Label.Text
     
     [double]$error_difference = 0
     [double]$actual_value = 0
@@ -116,8 +117,8 @@ $PID_c = [PowerShell]::Create().AddScript({ # a tenyleges munkátvégző kód
     {
         $actual_value = Measure-detector_current #detektoráram mérése
 
-        $error_difference = $set_point - $actual_value
-        $integral = $integral + ($error_difference * $iteration_time)
+        $error_difference = $([double]$sync.mCel_Label.Text/1000000000) - $actual_value
+        $integral = $integral + ($error_difference * [double]$sync.mMintavet_Label.Text)
             if ($integral -lt 0)
             {
                 $integral = 0
@@ -128,10 +129,10 @@ $PID_c = [PowerShell]::Create().AddScript({ # a tenyleges munkátvégző kód
             }
             if ($output -eq 1 -and ($error_difference -gt $error_prior * 1.1 -or $error_difference -lt $error_prior * 0.9))
             {
-                $integral = $integral + ($error_difference * $iteration_time)
+                $integral = $integral + ($error_difference * [double]$sync.mMintavet_Label.Text)
             }
-        $derivative = ($error_difference - $error_prior)/$iteration_time
-        $output = $KP * $error_difference + $KI * $integral + $KD * $derivative
+        $derivative = ($error_difference - $error_prior)/[double]$sync.mMintavet_Label.Text
+        $output = [double]$sync.mKP_Label.Text * $error_difference + [double]$sync.mKI_Label.Text * $integral + [double]$sync.mKD_Label.Text * $derivative
         $output = $m * $output + $b #detektor áram konvertálása LED meghajtóárammá
         $output =  [System.Math]::Round($output,3) #LED meghajtóáram konvetálása 3 tizedesjegyre
         if ($output -lt 0)
@@ -144,12 +145,12 @@ $PID_c = [PowerShell]::Create().AddScript({ # a tenyleges munkátvégző kód
             }
         $sync.gwport.WriteLine("ISET1:$($output)") #tápegységnek az új LED meghajtóáram érték küldése
 
-        $set_point.ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $sync.file -Append
+        $([double]$sync.mCel_Label.Text/1000000000).ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $sync.file -Append
 
         $error_prior  = $error_difference
         $intergral_prior = $integral
         
-        Start-Sleep -Milliseconds $iteration_time
+        Start-Sleep -Milliseconds $([double]$sync.mMintavet_Label.Text)
 
         if ($sync.mStop.Enabled -eq $false)
         {
@@ -188,69 +189,6 @@ $StopPIDloop = {
     $sync.mStop.Enabled = $false
     $sync.period = 1
 }
-
-<# #single trheaded realizaion, problem: GUI blocking
-function PID_control
-{
-    [double]$set_point = 0.0000001432
-    [double]$KP = 0.1
-    [double]$KI = 0.01
-    [double]$KD = 0
-    [double]$iteration_time = 70
-    
-    [double]$error_difference = 0
-    [double]$actual_value = 0
-    [double]$derivative = 0
-    [double]$output = 0
-
-    [double]$error_prior = 0
-    [double]$integral = 0
-
-    [double]$intergral_prior = 0
-
-    [double]$m=3884874
-    [double]$b=-0.1254
-
-    While ($true) #végtelen ciklus
-    {
-        $actual_value = Measure-detector_current #detektoráram mérése
-
-        $error_difference = $set_point - $actual_value
-        $integral = $integral + ($error_difference * $iteration_time)
-            if ($integral -lt 0)
-            {
-                $integral = 0
-            }
-            if ($output -eq 1)
-            {
-                $integral = $intergral_prior
-            }
-            if ($output -eq 1 -and ($error_difference -gt $error_prior * 1.1 -or $error_difference -lt $error_prior * 0.9))
-            {
-                $integral = $integral + ($error_difference * $iteration_time)
-            }
-        $derivative = ($error_difference - $error_prior)/$iteration_time
-        $output = $KP * $error_difference + $KI * $integral + $KD * $derivative
-        $output = $m * $output + $b #detektor áram konvertálása LED meghajtóárammá
-        $output =  [System.Math]::Round($output,3) #LED meghajtóáram konvetálása 3 tizedesjegyre
-        if ($output -lt 0)
-            {
-                $output = 0
-            }
-            elseif ($output -gt 1)
-            {
-                $output = 1
-            }
-        $gwport.WriteLine("ISET1:$($output)") #tápegységnek az új LED meghajtóáram érték küldése
-
-        $set_point.ToString() + "`t" + $actual_value.ToString() + "`t" + $error_difference.ToString() + "`t" + $integral.ToString() + "`t" + $derivative.ToString() + "`t" + $output.ToString() | Out-File $file -Append
-
-        $error_prior  = $error_difference
-        $intergral_prior = $integral
-   
-        Start-Sleep -Milliseconds $iteration_time
-    }
-}#>
 
 ######## függvények blokk vége ###########
 
@@ -324,21 +262,21 @@ function PID_control
 
                 $mCel_TrackBar.SetRange(10,160)
                 $mCel_TrackBar.TickFrequency=5
-                $mCel_TrackBar.Value=100
-                $TrackLabel_CEL_Value=100
+                $mCel_TrackBar.Value=140
+                $TrackLabel_CEL_Value=140
 
         $mCel_TrackBar.Size = New-Object System.Drawing.Size(460,23)
 
         $mCel_TrackBar.add_ValueChanged({
         $TrackLabel_CEL_Value = $mCel_TrackBar.Value
-        $mCel_Label.Text = "Célérték: $($TrackLabel_CEL_Value)nA"
+        $mCel_Label.Text = $TrackLabel_CEL_Value #"Célérték: $($TrackLabel_CEL_Value)nA"
         })
 
         $MyForm.Controls.Add($mCel_TrackBar) 
          
 #cel label
         $mCel_Label = New-Object System.Windows.Forms.Label 
-                $mCel_Label.Text="Célérték: $($TrackLabel_CEL_Value)nA"
+                $mCel_Label.Text= $TrackLabel_CEL_Value #"Célérték: $($TrackLabel_CEL_Value)nA"
                 $mCel_Label.Top="162" 
                 $mCel_Label.Left="218" 
                 $mCel_Label.Anchor="Left,Top" 
@@ -354,21 +292,21 @@ function PID_control
 
                  $mKP_TrackBar.SetRange(10,1100)
                  $mKP_TrackBar.TickFrequency=50
-                 $mKP_TrackBar.Value=200
-                $TrackLabel_P_Value=200
+                 $mKP_TrackBar.Value=100
+                $TrackLabel_P_Value=100
 
         $mKP_TrackBar.Size = New-Object System.Drawing.Size(460,23)
 
           $mKP_TrackBar.add_ValueChanged({
         $TrackLabel_P_Value =  $mKP_TrackBar.Value
-        $mKP_Label.Text = "KP értéke: $($TrackLabel_P_Value/1000)"
+        $mKP_Label.Text = $TrackLabel_P_Value/1000 #"KP értéke: $($TrackLabel_P_Value/1000)"
         })
 
         $MyForm.Controls.Add($mKP_TrackBar) 
          
 #P label
         $mKP_Label = New-Object System.Windows.Forms.Label 
-                $mKP_Label.Text="KP értéke: $($TrackLabel_P_Value/1000)"
+                $mKP_Label.Text= $TrackLabel_P_Value/1000 #"KP értéke: $($TrackLabel_P_Value/1000)"
                 $mKP_Label.Top="252" 
                 $mKP_Label.Left="217" 
                 $mKP_Label.Anchor="Left,Top" 
@@ -384,21 +322,21 @@ function PID_control
 
                 $mKI_TrackBar.SetRange(1,110)
                 $mKI_TrackBar.TickFrequency=5
-                $mKI_TrackBar.Value=40
-                $TrackLabel_I_Value=40
+                $mKI_TrackBar.Value=10
+                $TrackLabel_I_Value=10
 
         $mKI_TrackBar.Size = New-Object System.Drawing.Size(460,23) 
         
         $mKI_TrackBar.add_ValueChanged({
         $TrackLabel_I_Value =  $mKI_TrackBar.Value
-        $mKI_Label.Text = "KI értéke: $($TrackLabel_I_Value/1000)"
+        $mKI_Label.Text = $TrackLabel_I_Value/1000 #"KI értéke: $($TrackLabel_I_Value/1000)"
         })
 
         $MyForm.Controls.Add($mKI_TrackBar) 
          
 #I label
         $mKI_Label = New-Object System.Windows.Forms.Label 
-                $mKI_Label.Text="KI értéke: $($TrackLabel_I_Value/1000)"
+                $mKI_Label.Text= $TrackLabel_I_Value/1000 #"KI értéke: $($TrackLabel_I_Value/1000)"
                 $mKI_Label.Top="346" 
                 $mKI_Label.Left="223" 
                 $mKI_Label.Anchor="Left,Top" 
@@ -421,14 +359,14 @@ function PID_control
 
         $mKD_TrackBar.add_ValueChanged({
         $TrackLabel_D_Value =  $mKD_TrackBar.Value
-        $mKD_Label.Text = "KD értéke: $($TrackLabel_D_Value/1000)"
+        $mKD_Label.Text = $TrackLabel_D_Value/1000 #"KD értéke: $($TrackLabel_D_Value/1000)"
         })
 
         $MyForm.Controls.Add($mKD_TrackBar) 
          
 #D label
         $mKD_Label = New-Object System.Windows.Forms.Label 
-                $mKD_Label.Text="KD értéke: $($TrackLabel_D_Value/1000)"
+                $mKD_Label.Text= $TrackLabel_D_Value/1000 #"KD értéke: $($TrackLabel_D_Value/1000)"
                 $mKD_Label.Top="449" 
                 $mKD_Label.Left="221" 
                 $mKD_Label.Anchor="Left,Top" 
@@ -451,14 +389,14 @@ function PID_control
 
         $mMintavet_TrackBar.add_ValueChanged({
         $TrackLabel_M_Value =  $mMintavet_TrackBar.Value
-        $mMintavet_Label.Text = "Mintavételezési idő: $($TrackLabel_M_Value)ms"
+        $mMintavet_Label.Text = $TrackLabel_M_Value #"Mintavételezési idő: $($TrackLabel_M_Value)ms"
         })
 
         $MyForm.Controls.Add($mMintavet_TrackBar) 
          
 #sample rate label
         $mMintavet_Label = New-Object System.Windows.Forms.Label 
-                $mMintavet_Label.Text="Mintavételezési idő: $($TrackLabel_M_Value)ms"
+                $mMintavet_Label.Text= $TrackLabel_M_Value #"Mintavételezési idő: $($TrackLabel_M_Value)ms"
                 $mMintavet_Label.Top="547" 
                 $mMintavet_Label.Left="200" 
                 $mMintavet_Label.Anchor="Left,Top" 
@@ -509,14 +447,17 @@ function PID_control
         $mStop.Add_Click($StopPIDloop)
 
         # add controls to the form.
-        $sync.mStart = $mStart
-        $sync.mCel_Label = $mCel_Label
-        $sync.mStop = $mStop
-        $sync.mKP_Label = $mKP_Label 
-        $sync.mConnect_Label = $mConnect_Label
         $sync.mConnect = $mConnect
+        $sync.mConnect_Label = $mConnect_Label
+        $sync.mStart = $mStart
+        $sync.mStop = $mStop
+        $sync.mCel_Label = $mCel_Label     
+        $sync.mKP_Label = $mKP_Label 
+        $sync.mKI_Label = $mKI_Label
+        $sync.mKD_Label = $mKD_Label
+        $sync.mMintavet_Label = $mMintavet_Label
 
-        $MyForm.Controls.AddRange(@($sync.mStart, $sync.mCel_Label,$sync.mStop, $sync.mKP_Label, $sync.mConnect_Label, $sync.mConnect))
+        $MyForm.Controls.AddRange(@($sync.mConnect, $sync.mConnect_Label, $sync.mStart, $sync.mStop, $sync.mCel_Label, $sync.mKP_Label, $sync.mKI_Label, $sync.mKD_Label, $sync.mMintavet_Label))
 
         $MyForm.ShowDialog()  
 
